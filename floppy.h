@@ -8,6 +8,8 @@
 /**
  * \struct boot_struct
  * \brief structure that holds data taken from sector zero of the floppy image.
+ * \var boot_struct,boot_sector
+ * contains the location of the boot sector.
  * \var boot_struct.num_fat
  * contains the number of FATs in image. Starting byte: 16, length (in bytes): 1.
  * \var boot_struct.num_sectors_fat
@@ -18,14 +20,18 @@
  * contains the number of root entries the floppy image has. Starting byte: 17, length (in bytes): 2.
  * \var boot_struct.num_bytes_per_sector
  * contains the number of bytes that each sector occupies. Starting byte: 11, length (in bytes): 2.
+ * \var boot_struct,num_sectors_filesystem
+ * contains the total number of sectors in the filesystem Starting byte: 19, length (in bytes): 2.
  */
 
 typedef struct {
+    int boot_sector;
     int num_fat;
     int num_sectors_fat;
     int num_sectors_per_cluster;
     int num_root_entries;
     int num_bytes_per_sector;
+    int num_sectors_filesystem;
 } boot_struct;
 
 //functions that interact with image file
@@ -43,7 +49,11 @@ int read_boot(int fd, boot_struct *bs_pt);
 void fn_help();
 int fn_fmount(int fd);
 int fn_umount(int fd);
-int fn_structure(int fd, boot_struct *bs_pt);
+int fn_structure(boot_struct *bs_pt);
 int fn_showsector(int fd, long sector_num);
+
+//utility functions
+int read_two_byte_hex_num(int fd);
+
 #endif
 //PROJ_3_FLOPPY_H
