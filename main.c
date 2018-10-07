@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <math.h>
 
 #include "floppy.h"
 /**
@@ -35,7 +36,7 @@ int fn_umount(int fd)
     return 0;
 }
 
-//show the content of the specified sector number
+//show the content of the specified sector number. This function reads directly from image.
 int fn_showsector(int fd, long sector_num)
 {
     //print header
@@ -46,12 +47,15 @@ int fn_showsector(int fd, long sector_num)
             printf("\n\n");
         }
     }
+
     //save position of file offset
     off_t temp = lseek(fd, 0, SEEK_CUR);
+
     //set new position of file offset
-    //TODO: remove hardcoding of 512 and use size of sector from struct
-    unsigned int byte_offset = 0x200;
+    unsigned int byte_offset = (unsigned int) boot->num_bytes_per_sector;
     lseek(fd, sector_num * byte_offset, SEEK_SET);
+
+    //read and print the raw sector data
     unsigned char buf[512];
     unsigned char sidebar = 0x0;
     for(int i = 0; i < 512; i++){
@@ -66,28 +70,87 @@ int fn_showsector(int fd, long sector_num)
             printf("\n");
         }
     }
+
     //reposition file offset to original location
     lseek(fd, temp, SEEK_SET);
+    //TODO: clear warning : control reaches end of non-void function
 }
 
 //prints the structure of the floppy disk image
-int fn_structure(int fd, boot_struct *bs_pt)
+int fn_structure(boot_struct *bs_pt)
 {
-    printf("number of FAT:\t%d\n", bs_pt->num_fat);
-    printf("number of sectors used by FAT:\t%d\n", bs_pt->num_sectors_fat);
-    printf("number of sectors per cluster:\t%d\n", bs_pt->num_sectors_per_cluster);
-    printf("number of ROOT entries:\t%d\n", bs_pt->num_root_entries);
-    printf("number of bytes per sector:\t%d\n", bs_pt->num_bytes_per_sector);
+    printf("number of FAT:\t%21d\n",                bs_pt->num_fat);
+    printf("number of sectors used by FAT:%7d\n", bs_pt->num_sectors_fat);
+    printf("number of sectors per cluster:%7d\n", bs_pt->num_sectors_per_cluster);
+    printf("number of ROOT entries:%14d\n",       bs_pt->num_root_entries);
+    printf("number of bytes per sector:%10d\n",    bs_pt->num_bytes_per_sector);
+
+    int nsfat = bs_pt->num_sectors_fat;
+    int bs = bs_pt->boot_sector;
+    int nre = bs_pt->num_root_entries;
+    int bps = bs_pt->num_bytes_per_sector;
+
     printf("---Sector #---\t---Sector Types---\n");
-    //TODO: print the rest of this information
+    printf("\t%d\t%18s\n", bs, "BOOT");
+    printf("%d\t--\t%d\t%14s\n",(bs+1), (bs+nsfat), "FAT1");
+    printf("%d\t--\t%d\t%14s\n", (bs+nsfat+1), (bs+2*nsfat), "FAT2");
+    printf("%d\t--\t%d\t%14s\n", (bs+2*nsfat+1),(bs+2*nsfat)+(nre*32/bps), "ROOT");
+    //TODO: clear warning : control reaches end of non-void function
 }
 
 //functions that interact with image file
+int read_two_byte_hex_num(int fd)
+{
+    int result = 0;
+    unsigned char buf[4];
+    //read bytes from image
+    for(int i = 0; i <= 3; i += 2){
+        read(fd, &buf[i], 1);
+    }
+    //rearrange two byte numbers to reflect little endianness
+    for(int i = 0; i<= 2; i+=2 ) {
+        buf[i+1] = buf[i] >> 4;
+        buf[i] = buf[i] & (char) 0x0F;
+    }
+    //convert hex value to decimal
+    for(int i = 0; i<=3; i++) {
+        double addme = pow(16, (double) i);
+        result += buf[i] * (int) addme;
+    }
+    return result;
+}
+
 int read_boot(int fd, boot_struct *bs_pt)
 {
-    //position file offset to byte that holds required data
-    //extract data byte by byte using read
-    //store required data in boot struct
+    bs_pt->boot_sector = (int) lseek(fd, 0, SEEK_CUR);
+
+    //num_fat
+    lseek(fd, 16, SEEK_SET);
+    read(fd, &bs_pt->num_fat, 1);
+
+    //num_sectors_fat
+    lseek(fd, 22, SEEK_SET);
+    bs_pt->num_sectors_fat = read_two_byte_hex_num(fd);
+
+    //num_sectors_per_cluster
+    lseek(fd, 13, SEEK_SET);
+    read(fd, &bs_pt->num_sectors_per_cluster, 1);
+
+    //num_root_entries
+    lseek(fd, 17, SEEK_SET);
+    bs_pt->num_root_entries = read_two_byte_hex_num(fd);
+
+    //num_bytes_per_sector
+    lseek(fd, 11, SEEK_SET);
+    bs_pt->num_bytes_per_sector = read_two_byte_hex_num(fd);
+
+    //num_sectors_filesystem
+    lseek(fd, 19, SEEK_SET);
+    bs_pt->num_sectors_filesystem = read_two_byte_hex_num(fd);
+
+    //position file offset to end of sector zero
+    lseek(fd, 1 * (bs_pt->num_bytes_per_sector), SEEK_SET);
+    //TODO: clear warning : control reaches end of non-void function
 }
 
 int main()
@@ -95,7 +158,7 @@ int main()
     //the file descriptor for floppy image file
     //TODO: The filename should not be hardcoded. Fname should be set when fmount is called.
     //for debugging purposes you can set the absolute pathname of the .img file below
-    char *fname = "/absolute/path/to.img";
+    char *fname = "../imagefile.img";
     int fd = open(fname, O_RDONLY);
     if(fd < 0 ){
         perror(strerror(errno));
@@ -161,12 +224,12 @@ int main()
         }
         //display structure of the floppy disk
         else if(strncmp(input[0], structure, 9) == 0){
-            fn_structure(fd, boot);
+            fn_structure(boot);
         }
         //print a hex dump of a given sector of the floppy
         else if(strncmp(input[0], showsector, 10) == 0){
             char *next;
-            long sector=strtol(input[1], &next, 10);
+            long sector = strtol(input[1], &next, 10);
             fn_showsector(fd, sector);
         }
         //quit program
@@ -176,5 +239,6 @@ int main()
         else{printf("please re-try your command\n");}
     }
     free(boot);
+    close(fd);
     return 0;
 }
