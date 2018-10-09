@@ -24,14 +24,17 @@ void fn_help()
 }
 
 //description of function
-int fn_fmount(int fd)
+int fn_fmount(int fd, char *fname)
 {
+    //TODO: set fname and fd based on user input
     return 0;
 }
 
 //description of function
-int fn_umount(int fd)
+int fn_umount(int fd, char *fname)
 {
+    close(fd);
+    memset(fname, 0, sizeof(fname));
     return 0;
 }
 
@@ -72,7 +75,7 @@ int fn_showsector(int fd, long sector_num, boot_struct *boot_pt)
 
     //reposition file offset to original location
     lseek(fd, temp, SEEK_SET);
-    //TODO: clear warning : control reaches end of non-void function
+    //@rj-pe TODO: clear warning : control reaches end of non-void function
 }
 
 //prints the structure of the floppy disk image
@@ -94,7 +97,7 @@ int fn_structure(boot_struct *bs_pt)
     printf("%d\t--\t%d\t%14s\n",(bs+1), (bs+nsfat), "FAT1");
     printf("%d\t--\t%d\t%14s\n", (bs+nsfat+1), (bs+2*nsfat), "FAT2");
     printf("%d\t--\t%d\t%14s\n", (bs+2*nsfat+1),(bs+2*nsfat)+(nre*32/bps), "ROOT");
-    //TODO: clear warning : control reaches end of non-void function
+    //@rj-pe TODO: clear warning : control reaches end of non-void function
 }
 
 ///////////////////////////////////////////////////////////////
@@ -151,5 +154,5 @@ int read_boot(int fd, boot_struct *bs_pt)
 
     //position file offset to end of sector zero
     lseek(fd, 1 * (bs_pt->num_bytes_per_sector), SEEK_SET);
-    //TODO: clear warning : control reaches end of non-void function
+    //@rj-pe TODO: clear warning : control reaches end of non-void function
 }

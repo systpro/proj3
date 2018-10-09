@@ -47,8 +47,8 @@ int read_boot(int fd, boot_struct *bs_pt);
 
 //functions called by user commands
 void fn_help();
-int fn_fmount(int fd);
-int fn_umount(int fd);
+int fn_fmount(int fd, char *fname);
+int fn_umount(int fd, char *fname);
 int fn_structure(boot_struct *bs_pt);
 int fn_showsector(int fd, long sector_num, boot_struct *boot_pt);
 
