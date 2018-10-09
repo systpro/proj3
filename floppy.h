@@ -4,6 +4,7 @@
 
 #ifndef PROJ_3_FLOPPY_H
 #define PROJ_3_FLOPPY_H
+
 //structs that hold data extracted from image file
 /**
  * \struct boot_struct
@@ -23,7 +24,6 @@
  * \var boot_struct,num_sectors_filesystem
  * contains the total number of sectors in the filesystem Starting byte: 19, length (in bytes): 2.
  */
-
 typedef struct {
     int boot_sector;
     int num_fat;
@@ -50,7 +50,7 @@ void fn_help();
 int fn_fmount(int fd);
 int fn_umount(int fd);
 int fn_structure(boot_struct *bs_pt);
-int fn_showsector(int fd, long sector_num);
+int fn_showsector(int fd, long sector_num, boot_struct *boot_pt);
 
 //utility functions
 int read_two_byte_hex_num(int fd);
