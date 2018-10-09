@@ -1,6 +1,7 @@
 //
 // Created by arcticlemming on 10/9/18.
 //
+
 #include <stdio.h>
 #include <memory.h>
 #include <fcntl.h>
@@ -12,8 +13,9 @@
 
 #include "floppy.h"
 
-
-//functions called by user commands
+///////////////////////////////////////////////////////////////
+///////////////// functions called by user commands ///////////
+///////////////////////////////////////////////////////////////
 
 //description of function
 void fn_help()
@@ -33,7 +35,7 @@ int fn_umount(int fd)
     return 0;
 }
 
-//show the content of the specified sector number. This function reads directly from image.
+//show the content of the specified sector number.
 int fn_showsector(int fd, long sector_num, boot_struct *boot_pt)
 {
     //print header
@@ -95,7 +97,9 @@ int fn_structure(boot_struct *bs_pt)
     //TODO: clear warning : control reaches end of non-void function
 }
 
-//functions that interact with image file
+///////////////////////////////////////////////////////////////
+/////////////// functions that interact with image file ///////
+///////////////////////////////////////////////////////////////
 int read_two_byte_hex_num(int fd)
 {
     int result = 0;
