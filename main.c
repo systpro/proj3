@@ -69,7 +69,8 @@ int main()
         //mount the filesystem
         else if( strncmp(input[0], fmount, 6) == 0){
             //TODO: check if fd has already been set, if it is return an error message.
-            fn_fmount(fd, fname);
+            strcpy(fname, input[1]);
+            fn_fmount(&fd, fname);
             //allocate heap storage for structs that hold organized image data.
             //@rj-pe TODO: allocate memory for FAT 1,FAT 2, and root structs.
             boot = (boot_struct*) malloc(sizeof(boot_struct));

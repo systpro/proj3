@@ -24,9 +24,9 @@ void fn_help()
 }
 
 //description of function
-int fn_fmount(int fd, char *fname)
+int fn_fmount(int * fd, char * fname)
 {
-    //TODO: set fname and fd based on user input
+    *fd = open(fname, O_RDONLY);
     return 0;
 }
 
