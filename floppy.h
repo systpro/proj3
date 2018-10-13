@@ -23,6 +23,8 @@
  * contains the number of bytes that each sector occupies. Starting byte: 11, length (in bytes): 2.
  * \var boot_struct,num_sectors_filesystem
  * contains the total number of sectors in the filesystem Starting byte: 19, length (in bytes): 2.
+ * \var boot_struct.num_reserved_sectors
+ * contains the number of reserved sectors. Starting byte: 14, length(in bytes): 2.
  */
 typedef struct {
     int boot_sector;
@@ -32,7 +34,13 @@ typedef struct {
     int num_root_entries;
     int num_bytes_per_sector;
     int num_sectors_filesystem;
+    int num_reserved_sectors;
 } boot_struct;
+
+//TODO: write doxygen documentation for the fat1 struct
+typedef struct {
+    unsigned short *entries;
+} fat_struct;
 
 //functions that interact with image file
 /**
@@ -44,6 +52,7 @@ typedef struct {
  * at the beginning of sector one.
  */
 int read_boot(int fd, boot_struct *bs_pt);
+int read_fat(int fd, boot_struct *bs_pt ,fat_struct *fat_pt);
 
 //functions called by user commands
 void fn_help();
@@ -51,6 +60,7 @@ int fn_fmount(int * fd, char * fname);
 int fn_umount(int fd, char *fname);
 int fn_structure(boot_struct *bs_pt);
 int fn_showsector(int fd, long sector_num, boot_struct *boot_pt);
+int fn_showfat(int fd, fat_struct *fat_pt);
 
 //utility functions
 int read_two_byte_hex_num(int fd);
