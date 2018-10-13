@@ -1,6 +1,3 @@
-//
-// Created by arcticlemming on 10/9/18.
-//
 
 #include <stdio.h>
 #include <memory.h>
@@ -27,6 +24,9 @@ void fn_help()
 int fn_fmount(int * fd, char * fname)
 {
     *fd = open(fname, O_RDONLY);
+    if(*fd < 0 ){
+        printf("%s\n", strerror(errno));
+    }
     return 0;
 }
 
@@ -58,6 +58,7 @@ int fn_showsector(int fd, long sector_num, boot_struct *boot_pt)
     lseek(fd, sector_num * byte_offset, SEEK_SET);
 
     //read and print the raw sector data
+    //@rj-pe TODO: remove hardcoding of 512 and replace with num_bytes_per_sector
     unsigned char buf[512];
     unsigned char sidebar = 0x0;
     for(int i = 0; i < 512; i++){
@@ -76,6 +77,44 @@ int fn_showsector(int fd, long sector_num, boot_struct *boot_pt)
     //reposition file offset to original location
     lseek(fd, temp, SEEK_SET);
     //@rj-pe TODO: clear warning : control reaches end of non-void function
+}
+
+int fn_showfat(int fd, fat_struct *fat_pt){
+
+    /* TODO: Format this table properly. The correct information is displayed, but formatting is bad.
+    */
+    // print header
+    printf("\t\t");
+    for(unsigned char header = 0x0; header <= 0xF; header++){
+        printf("%2X\t", header);
+        if(header == 0xF){
+            printf("\n\n");
+        }
+    }
+    unsigned char sidebar = 0x0;
+
+    for(int i = 0; i < 256; i++){
+        //print sidebar
+        if( i % 16 == 0){
+            printf("%X0\t\t", sidebar++);
+        }
+        //don't print the first two fat1 table entries
+        if(i == 0 || i == 1){
+            printf("\t");
+            continue;
+        }
+        //if the entry contains a 0 then print "FREE"
+        if(fat_pt->entries[i] == 0){
+            printf("FREE ");
+        } else {
+            printf("%2x\t", fat_pt->entries[i]);
+        }
+        //print a newline at the end of each row
+        if(((i+1) % 16 == 0) && (i>1)){
+            printf("\n");
+        }
+    }
+    return 0;
 }
 
 //prints the structure of the floppy disk image
@@ -152,7 +191,37 @@ int read_boot(int fd, boot_struct *bs_pt)
     lseek(fd, 19, SEEK_SET);
     bs_pt->num_sectors_filesystem = read_two_byte_hex_num(fd);
 
+    //num_reserved_sectors
+    lseek(fd, 14, SEEK_SET);
+    bs_pt->num_reserved_sectors = read_two_byte_hex_num(fd);
+
     //position file offset to end of sector zero
     lseek(fd, 1 * (bs_pt->num_bytes_per_sector), SEEK_SET);
-    //@rj-pe TODO: clear warning : control reaches end of non-void function
+    return 0;
+}
+
+int read_fat(int fd, boot_struct *bs_pt ,fat_struct *fat_pt){
+    int nsf = bs_pt->num_sectors_fat;
+    int bps = bs_pt->num_bytes_per_sector;
+    int fat1 = bps * bs_pt->num_reserved_sectors;
+    unsigned char raw_fat[nsf*bps];
+    unsigned char temp_buf[3];
+
+    //read raw fat1 data from image into a buffer
+    lseek(fd, fat1, SEEK_SET);
+    read(fd, raw_fat, (size_t) nsf*bps);
+
+    fat_pt->entries = (unsigned short *) realloc(fat_pt->entries, nsf * bps / 3 * sizeof(unsigned short));
+    memset(fat_pt->entries, 0, sizeof(unsigned short*));
+
+    for(int i = 0; i < nsf*bps/3; i++){
+        //grab three bytes from raw fat1 data buffer
+        temp_buf[0] = raw_fat[i*3];
+        temp_buf[1] = raw_fat[i*3+1];
+        temp_buf[2] = raw_fat[i*3+2];
+        /*parse three bytes into two fat1 entries*/
+        fat_pt->entries[i*2]= (((unsigned short) temp_buf[1] & 0x0F) << 8 ) | ((unsigned short) temp_buf[0]);
+        fat_pt->entries[i*2+1]= (((unsigned short) temp_buf[2]) << 4)|(((unsigned short) temp_buf[1]) >>4);
+    }
+    return 0;
 }

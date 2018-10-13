@@ -14,19 +14,13 @@
  * directly from the floppy image.
  */
 boot_struct *boot;
+fat_struct *fat1;
 
 int main()
 {
-    //TODO: The filename & fd should not be hardcoded.
     char fname[PATH_MAX];
-    //for debugging purposes, set the absolute pathname of the .img file below
-    strcpy(fname, "../imagefile.img");
     //the file descriptor for floppy image file
-    int fd = open(fname, O_RDONLY);
-
-    if(fd < 0 ){
-        perror(strerror(errno));
-    }
+    int fd = 0;
 
     //command names
     char *help = "help\0";
@@ -34,6 +28,7 @@ int main()
     char *umount = "umount\0";
     char *structure = "structure\0";
     char *showsector = "showsector\0";
+    char *showfat = "showfat\0";
     char *quit = "quit\0";
     while(1)
     {
@@ -74,9 +69,11 @@ int main()
             //allocate heap storage for structs that hold organized image data.
             //@rj-pe TODO: allocate memory for FAT 1,FAT 2, and root structs.
             boot = (boot_struct*) malloc(sizeof(boot_struct));
+            fat1 = (fat_struct*) malloc(sizeof(fat_struct));
             //read data from image file and copy into structs.
             //@rj-pe TODO: perform read and copy operations on FAT 1, FAT 2, and root.
             read_boot(fd, boot);
+            read_fat(fd, boot, fat1);
         }
         //unmount the filesystem
         else if( strncmp(input[0], umount, 6) == 0){
@@ -109,6 +106,10 @@ int main()
             //display the requested sector
             fn_showsector(fd, sector, boot);
         }
+        //show contents of the first 256 entries in the FAT table
+        else if(strncmp(input[0], showfat, 7) == 0){
+            fn_showfat(fd, fat1);
+        }
         //quit program
         else if( strncmp(input[0], quit, 4) == 0){
             break;
@@ -120,6 +121,7 @@ int main()
     }
     //@rj-pe TODO: free all dynamically allocated mem (FAT1, FAT2, root)
     free(boot);
+    free(fat1);
     close(fd);
     return 0;
 }
