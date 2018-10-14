@@ -1,7 +1,7 @@
 //
 // Created by arrjai on 10/5/18.
 //
-
+#include <time.h>
 #ifndef PROJ_3_FLOPPY_H
 #define PROJ_3_FLOPPY_H
 
@@ -37,10 +37,25 @@ typedef struct {
     int num_reserved_sectors;
 } boot_struct;
 
-//TODO: write doxygen documentation for the fat1 struct
+//TODO: write doxygen documentation for the fat struct
 typedef struct {
     unsigned short *entries;
 } fat_struct;
+
+//TODO: write doxygen documentation for the root struct
+typedef struct{
+    char filename[9];
+    char extension[4];
+    unsigned char attribute;
+    struct tm creation_time;
+    struct tm creation_date;
+    struct tm last_access_date;
+    struct tm last_write_time;
+    struct tm last_write_date;
+    unsigned short first_logical_cluster;
+    unsigned long file_size;
+    char available;
+} root_struct;
 
 //functions that interact with image file
 /**
@@ -52,7 +67,12 @@ typedef struct {
  * at the beginning of sector one.
  */
 int read_boot(int fd, boot_struct *bs_pt);
-int read_fat(int fd, boot_struct *bs_pt ,fat_struct *fat_pt);
+
+//TODO: write doxygen documentation for read_fat
+int read_fat(int fd, boot_struct *bs_pt, fat_struct *fat_pt);
+
+//TODO: write documentation for read_root
+int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt);
 
 //functions called by user commands
 void fn_help();
@@ -60,10 +80,17 @@ int fn_fmount(int * fd, char * fname);
 int fn_umount(int fd, char *fname);
 int fn_structure(boot_struct *bs_pt);
 int fn_showsector(int fd, long sector_num, boot_struct *boot_pt);
-int fn_showfat(int fd, fat_struct *fat_pt);
+int fn_showfat(fat_struct *fat_pt);
+int fn_traverse(root_struct **root_pt, int entries);
 
 //utility functions
 int read_two_byte_hex_num(int fd);
+unsigned long read_ulong(const unsigned char *bytes, size_t pos);
+unsigned short read_ushort(const unsigned char *bytes, size_t pos);
+void get_attributes(unsigned char att_byte, char *string);
+int check_mask(unsigned char att_byte, unsigned char mask);
+int create_date(struct tm *date, unsigned char *bytes, size_t position);
+int create_time(struct tm *time, unsigned char *bytes, size_t position);
 
 #endif
 //PROJ_3_FLOPPY_H
