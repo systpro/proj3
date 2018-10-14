@@ -15,6 +15,13 @@
  */
 boot_struct *boot;
 fat_struct *fat1;
+root_struct **root;
+int max_entries = 0;
+
+//TODO: read data from image and fill fat2
+//TODO: compare contents of fat1 and fat2
+//TODO: if contents are not the same inform user
+//fat_struct *fat2;
 
 int main()
 {
@@ -29,6 +36,7 @@ int main()
     char *structure = "structure\0";
     char *showsector = "showsector\0";
     char *showfat = "showfat\0";
+    char *traverse = "traverse\0";
     char *quit = "quit\0";
     while(1)
     {
@@ -67,13 +75,25 @@ int main()
             strcpy(fname, input[1]);
             fn_fmount(&fd, fname);
             //allocate heap storage for structs that hold organized image data.
-            //@rj-pe TODO: allocate memory for FAT 1,FAT 2, and root structs.
+            //@rj-pe TODO: allocate memory for FAT 2 struct.
             boot = (boot_struct*) malloc(sizeof(boot_struct));
             fat1 = (fat_struct*) malloc(sizeof(fat_struct));
+
             //read data from image file and copy into structs.
-            //@rj-pe TODO: perform read and copy operations on FAT 1, FAT 2, and root.
+            //@rj-pe TODO: perform read and copy operations on FAT 2.
             read_boot(fd, boot);
             read_fat(fd, boot, fat1);
+            //keep track of max size of root to free correct amount of memory when closing
+            if(boot->num_root_entries > max_entries){
+                max_entries = boot->num_root_entries;
+            }
+            //allocate heap storage for root array
+            root = (root_struct **) malloc(boot->num_root_entries * sizeof(root_struct *));
+            for(int i = 0; i < boot->num_root_entries; i++){
+                root[i] = malloc(sizeof(root_struct));
+            }
+            //read data from disk image into root struct array
+            read_root(fd, boot, root);
         }
         //unmount the filesystem
         else if( strncmp(input[0], umount, 6) == 0){
@@ -108,7 +128,12 @@ int main()
         }
         //show contents of the first 256 entries in the FAT table
         else if(strncmp(input[0], showfat, 7) == 0){
-            fn_showfat(fd, fat1);
+            fn_showfat(fat1);
+        }
+        //list content in the root directory
+        //TODO: function is working on a very basic level, add functionality
+        else if(strncmp(input[0], traverse, 8) == 0){
+            fn_traverse(root, boot->num_root_entries);
         }
         //quit program
         else if( strncmp(input[0], quit, 4) == 0){
@@ -119,9 +144,13 @@ int main()
         //user did not enter a valid command
         else{printf("please re-try your command\n");}
     }
-    //@rj-pe TODO: free all dynamically allocated mem (FAT1, FAT2, root)
+    //@rj-pe TODO: free all dynamically allocated mem (FAT2)
     free(boot);
     free(fat1);
+    for(int i = 0; i < max_entries; i++){
+        free(root[i]);
+    }
+    free(root);
     close(fd);
     return 0;
 }
