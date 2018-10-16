@@ -14,9 +14,10 @@
  * directly from the floppy image.
  */
 boot_struct *boot;
-fat_struct *fat1;
+fat_struct **fat1;
 root_struct **root;
 int max_entries = 0;
+int max_fat_entries = 0;
 
 //TODO: read data from image and fill fat2
 //TODO: compare contents of fat1 and fat2
@@ -37,6 +38,7 @@ int main()
     char *showsector = "showsector\0";
     char *showfat = "showfat\0";
     char *traverse = "traverse\0";
+    char *dashel = "-l\0";
     char *quit = "quit\0";
     while(1)
     {
@@ -72,16 +74,24 @@ int main()
         //mount the filesystem
         else if( strncmp(input[0], fmount, 6) == 0){
             //TODO: check if fd has already been set, if it is return an error message.
+            int fat_entries = 0;
             strcpy(fname, input[1]);
             fn_fmount(&fd, fname);
             //allocate heap storage for structs that hold organized image data.
             //@rj-pe TODO: allocate memory for FAT 2 struct.
             boot = (boot_struct*) malloc(sizeof(boot_struct));
-            fat1 = (fat_struct*) malloc(sizeof(fat_struct));
-
             //read data from image file and copy into structs.
             //@rj-pe TODO: perform read and copy operations on FAT 2.
             read_boot(fd, boot);
+
+            fat_entries = boot->num_sectors_fat * boot->num_bytes_per_sector / 3;
+            if(fat_entries > max_fat_entries){
+                max_fat_entries = fat_entries;
+            }
+            fat1 = (fat_struct **) malloc( fat_entries * sizeof(fat_struct *));
+            for( int i = 0; i < fat_entries; i++){
+                fat1[i] = malloc(sizeof(boot_struct));
+            }
             read_fat(fd, boot, fat1);
             //keep track of max size of root to free correct amount of memory when closing
             if(boot->num_root_entries > max_entries){
@@ -133,7 +143,12 @@ int main()
         //list content in the root directory
         //TODO: function is working on a very basic level, add functionality
         else if(strncmp(input[0], traverse, 8) == 0){
-            fn_traverse(root, boot->num_root_entries);
+            if(strncmp(input[1], dashel, 2) == 0){
+                //fn_traverse_l();
+            } else {
+                print_dir(root, boot->num_root_entries);
+                //fn_traverse(root, boot->num_root_entries);
+            }
         }
         //quit program
         else if( strncmp(input[0], quit, 4) == 0){
@@ -146,11 +161,14 @@ int main()
     }
     //@rj-pe TODO: free all dynamically allocated mem (FAT2)
     free(boot);
+    for(int i =0; i < max_fat_entries; i++){
+        free(fat1[i]);
+    }
     free(fat1);
     for(int i = 0; i < max_entries; i++){
         free(root[i]);
     }
     free(root);
     close(fd);
-    return 0;
+    exit( 0);
 }

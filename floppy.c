@@ -79,14 +79,14 @@ int fn_showsector(int fd, long sector_num, boot_struct *boot_pt)
     //@rj-pe TODO: clear warning : control reaches end of non-void function
 }
 
-int fn_showfat(fat_struct *fat_pt){
+int fn_showfat(fat_struct **fat_pt){
 
     /* TODO: Format this table properly. The correct information is displayed, but formatting is bad.
     */
     // print header
-    printf("\t\t");
+    printf("   ");
     for(unsigned char header = 0x0; header <= 0xF; header++){
-        printf("%2X\t", header);
+        printf("  %X  ", header);
         if(header == 0xF){
             printf("\n\n");
         }
@@ -96,18 +96,18 @@ int fn_showfat(fat_struct *fat_pt){
     for(int i = 0; i < 256; i++){
         //print sidebar
         if( i % 16 == 0){
-            printf("%X0\t\t", sidebar++);
+            printf("%X0  ", sidebar++);
         }
         //don't print the first two fat1 table entries
         if(i == 0 || i == 1){
-            printf("\t");
+            printf("     ");
             continue;
         }
         //if the entry contains a 0 then print "FREE"
-        if(fat_pt->entries[i] == 0){
+        if(fat_pt[i]->address == 0){
             printf("FREE ");
         } else {
-            printf("%2x\t", fat_pt->entries[i]);
+            printf("%4x ", fat_pt[i]->address);
         }
         //print a newline at the end of each row
         if(((i+1) % 16 == 0) && (i>1)){
@@ -167,6 +167,15 @@ int fn_structure(boot_struct *bs_pt)
 ///////////////////////////////////////////////////////////////
 /////////////// utility functions /////////////////////////////
 ///////////////////////////////////////////////////////////////
+
+void print_dir(root_struct **root_pt, int entries){
+    unsigned char msk_subdir = 0x10;
+    for(int i =0; i < entries; i++){
+        if(check_mask( root_pt[i]->attribute, msk_subdir)){
+            printf("%s%d\n",root_pt[i]->filename, root_pt[i]->first_logical_cluster);
+        }
+    }
+}
 
 int read_two_byte_hex_num(int fd)
 {
@@ -308,10 +317,10 @@ int read_boot(int fd, boot_struct *bs_pt)
     return 0;
 }
 
-int read_fat(int fd, boot_struct *bs_pt ,fat_struct *fat_pt){
+int read_fat(int fd, boot_struct *bs_pt ,fat_struct **fat_pt){
     int nsf = bs_pt->num_sectors_fat;
     int bps = bs_pt->num_bytes_per_sector;
-    int fat1 = bps * bs_pt->num_reserved_sectors;
+    int fat1_size = bps * bs_pt->num_reserved_sectors;
     unsigned char raw_fat[nsf*bps];
     unsigned char buf[3];
     unsigned short *canary;
@@ -319,27 +328,18 @@ int read_fat(int fd, boot_struct *bs_pt ,fat_struct *fat_pt){
     unsigned short shift8 = 8;
     unsigned short shift4 = 4;
 
-    //read raw fat1 data from image into a buffer
-    lseek(fd, fat1, SEEK_SET);
+    //read raw fat1_size data from image into a buffer
+    lseek(fd, fat1_size, SEEK_SET);
     read(fd, raw_fat, (size_t) nsf*bps);
 
-    canary = (unsigned short *) calloc((size_t) 2 * nsf * bps / 3, sizeof(unsigned short));
-    if(canary != NULL){
-        *&fat_pt->entries = canary;
-        free(canary);
-    } else {
-        printf("%s", stderr);
-    }
-    //memset(fat_pt->entries, 0, sizeof(unsigned short*));
-
-    for(int i = 0; i < nsf*bps/3; i++){
-        //grab three bytes from raw fat1 data buffer
+    for(int i = 0; i < (nsf*bps/6)-1; i++){
+        //grab three bytes from raw fat1_size data buffer
         buf[0] = raw_fat[i*3];
         buf[1] = raw_fat[i*3+1];
         buf[2] = raw_fat[i*3+2];
-        /*parse three bytes into two fat1 entries*/
-        fat_pt->entries[i*2]= ((((unsigned short) buf[1]) & mask) << shift8 ) | ((unsigned short) buf[0]);
-        fat_pt->entries[i*2+1]= (((unsigned short) buf[2]) << shift4 |(((unsigned short) buf[1]) >> shift4));
+        /*parse three bytes into two fat1_size entries*/
+        fat_pt[i*2]->address = (((unsigned short) buf[1] & 0x0Fu) << 8u ) | ((unsigned short) buf[0]);
+        fat_pt[i*2+1]->address= (((unsigned short) buf[2]) << 4u)|(((unsigned short) buf[1]) >> 4u);
     }
     return 0;
 }
