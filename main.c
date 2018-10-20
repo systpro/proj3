@@ -112,15 +112,12 @@ int main()
                 if(strcmp(input[1], fname) == 0){
                     //match: proceed with umount
                     fn_umount(fd, fname);
-                }
-                    //no match: print error message
-                else{
+                } else{ //no match: print error message
                     printf("%s %s\n%s", input[1],
                            "is not currently mounted.",
                            "hint: no argument is required for this command\n");
                 }
-            }
-            else{
+            } else{
                 fn_umount(fd, fname);
             }
         }
@@ -146,8 +143,8 @@ int main()
             if(strncmp(input[1], dashel, 2) == 0){
                 //fn_traverse_l();
             } else {
-                print_dir(root, boot->num_root_entries);
-                //fn_traverse(root, boot->num_root_entries);
+                //print_dir(root, boot->num_root_entries);
+                fn_traverse(root, boot->num_root_entries, fat1);
             }
         }
         //quit program

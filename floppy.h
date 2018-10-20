@@ -81,7 +81,7 @@ int fn_umount(int fd, char *fname);
 int fn_structure(boot_struct *bs_pt);
 int fn_showsector(int fd, long sector_num, boot_struct *boot_pt);
 int fn_showfat(fat_struct **fat_pt);
-int fn_traverse(root_struct **root_pt, int entries);
+int fn_traverse(root_struct **root_pt, int entries, fat_struct **fat_pt);
 
 //utility functions
 int read_two_byte_hex_num(int fd);
@@ -92,6 +92,7 @@ int check_mask(unsigned char att_byte, unsigned char mask);
 int create_date(struct tm *date, unsigned char *bytes, size_t position);
 int create_time(struct tm *time, unsigned char *bytes, size_t position);
 void print_dir(root_struct **root_pt, int entries);
-
+//looks through the sector data for contents of a given directory. Returns number of items found.
+int check_dir_contents(fat_struct **fat_pt, unsigned short fat_cluster);
 #endif
 //PROJ_3_FLOPPY_H

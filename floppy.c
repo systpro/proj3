@@ -117,7 +117,7 @@ int fn_showfat(fat_struct **fat_pt){
     return 0;
 }
 
-int fn_traverse(root_struct **root_pt, int entries)
+int fn_traverse(root_struct **root_pt, int entries, fat_struct **fat_pt)
 {
     //unsigned char msk_rd_only = 0x01;
     unsigned char msk_hidden = 0x02;
@@ -129,12 +129,11 @@ int fn_traverse(root_struct **root_pt, int entries)
     //TODO: figure out how nested directories work
 
     for(int i = 0; i < entries; i++ ){
-
         if( (! check_mask(root_pt[i]->attribute, msk_hidden)) && (! root_pt[i]->available) ) {
             if( check_mask(root_pt[i]->attribute, msk_subdir)){
-                printf("/%s.%s\t<DIR>\n", root_pt[i]->filename, root_pt[i]->extension);
-            }
-            else {
+                int entries = check_dir_contents(fat_pt, root_pt[i]->first_logical_cluster);
+                printf("/%s\t<DIR>\n", root_pt[i]->filename);
+            } else {
                 printf("/%s.%s\n", root_pt[i]->filename, root_pt[i]->extension);
             }
         }
@@ -167,6 +166,12 @@ int fn_structure(boot_struct *bs_pt)
 ///////////////////////////////////////////////////////////////
 /////////////// utility functions /////////////////////////////
 ///////////////////////////////////////////////////////////////
+
+int check_dir_contents(fat_struct **fat_pt, unsigned short first_cluster){
+    int entries = 0;
+    fat_pt[first_cluster];
+    return entries;
+}
 
 void print_dir(root_struct **root_pt, int entries){
     unsigned char msk_subdir = 0x10;
@@ -323,7 +328,10 @@ int read_fat(int fd, boot_struct *bs_pt ,fat_struct **fat_pt){
     int fat1_size = bps * bs_pt->num_reserved_sectors;
     unsigned char raw_fat[nsf*bps];
     unsigned char buf[3];
-    
+
+    //read raw fat1_size data from image into a buffer
+    lseek(fd, fat1_size, SEEK_SET);
+
     //read raw fat1_size data from image into a buffer
     lseek(fd, fat1_size, SEEK_SET);
     read(fd, raw_fat, (size_t) nsf*bps);
@@ -352,6 +360,7 @@ int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt)
     int sde = 32;
     unsigned char raw_root[nre * sde];
     unsigned char buf[32];
+    unsigned char msk_subdir = 0x10;
 
     //read raw root data from image into a buffer
     lseek(fd, root_pos, SEEK_SET);
@@ -402,6 +411,5 @@ int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt)
         //extract file size from raw data.
         rt_pt[i]->file_size = read_ulong(&buf[0], 28);
     }
-
     return 0;
 }
