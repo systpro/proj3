@@ -323,11 +323,7 @@ int read_fat(int fd, boot_struct *bs_pt ,fat_struct **fat_pt){
     int fat1_size = bps * bs_pt->num_reserved_sectors;
     unsigned char raw_fat[nsf*bps];
     unsigned char buf[3];
-    unsigned short *canary;
-    unsigned short mask = 0x0F;
-    unsigned short shift8 = 8;
-    unsigned short shift4 = 4;
-
+    
     //read raw fat1_size data from image into a buffer
     lseek(fd, fat1_size, SEEK_SET);
     read(fd, raw_fat, (size_t) nsf*bps);
