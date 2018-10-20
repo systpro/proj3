@@ -39,7 +39,7 @@ typedef struct {
 
 //TODO: write doxygen documentation for the fat struct
 typedef struct {
-    unsigned short *entries;
+    unsigned short address;
 } fat_struct;
 
 //TODO: write doxygen documentation for the root struct
@@ -69,7 +69,7 @@ typedef struct{
 int read_boot(int fd, boot_struct *bs_pt);
 
 //TODO: write doxygen documentation for read_fat
-int read_fat(int fd, boot_struct *bs_pt, fat_struct *fat_pt);
+int read_fat(int fd, boot_struct *bs_pt, fat_struct **fat_pt);
 
 //TODO: write documentation for read_root
 int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt);
@@ -80,7 +80,7 @@ int fn_fmount(int * fd, char * fname);
 int fn_umount(int fd, char *fname);
 int fn_structure(boot_struct *bs_pt);
 int fn_showsector(int fd, long sector_num, boot_struct *boot_pt);
-int fn_showfat(fat_struct *fat_pt);
+int fn_showfat(fat_struct **fat_pt);
 int fn_traverse(root_struct **root_pt, int entries);
 
 //utility functions
@@ -91,6 +91,7 @@ void get_attributes(unsigned char att_byte, char *string);
 int check_mask(unsigned char att_byte, unsigned char mask);
 int create_date(struct tm *date, unsigned char *bytes, size_t position);
 int create_time(struct tm *time, unsigned char *bytes, size_t position);
+void print_dir(root_struct **root_pt, int entries);
 
 #endif
 //PROJ_3_FLOPPY_H
