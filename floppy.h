@@ -44,7 +44,7 @@ typedef struct {
 
 //TODO: write doxygen documentation for the root struct
 typedef struct{
-    char filename[9];
+    char filename[13];
     char extension[4];
     unsigned char attribute;
     struct tm creation_time;
@@ -56,6 +56,20 @@ typedef struct{
     unsigned long file_size;
     char available;
 } root_struct;
+
+typedef struct{
+    off_t address;
+    off_t next;
+} list;
+
+//TODO: write doxygen documentation for file_struct
+typedef struct{
+    char filename[13];
+    int cluster_count;
+    int length;
+    unsigned char *data;
+    list *cluster_list;
+} file_struct;
 
 //functions that interact with image file
 /**
@@ -74,6 +88,9 @@ int read_fat(int fd, boot_struct *bs_pt, fat_struct **fat_pt);
 //TODO: write documentation for read_root
 int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt);
 
+//TODO: write documentation for read_file
+int read_files(int fd, int entries, off_t data_start, int cluster_bytes, file_struct **f_pt, root_struct **rt_pt, fat_struct **fat_pt);
+
 //functions called by user commands
 void fn_help();
 int fn_fmount(int * fd, char * fname);
@@ -81,7 +98,8 @@ int fn_umount(int fd, char *fname);
 int fn_structure(boot_struct *bs_pt);
 int fn_showsector(int fd, long sector_num, boot_struct *boot_pt);
 int fn_showfat(fat_struct **fat_pt);
-int fn_traverse(root_struct **root_pt, int entries, fat_struct **fat_pt);
+int fn_traverse(root_struct **root_pt, int entries, fat_struct **fat_pt, int fd);
+int fn_showfile(file_struct **f_pt, int file_count, char *filename);
 
 //utility functions
 int read_two_byte_hex_num(int fd);
@@ -93,6 +111,26 @@ int create_date(struct tm *date, unsigned char *bytes, size_t position);
 int create_time(struct tm *time, unsigned char *bytes, size_t position);
 void print_dir(root_struct **root_pt, int entries);
 //looks through the sector data for contents of a given directory. Returns number of items found.
-int check_dir_contents(fat_struct **fat_pt, unsigned short fat_cluster);
+int check_dir_contents(fat_struct **fat_pt, unsigned short fat_cluster, int fd);
+//returns a count of root entries not listed as free
+int get_file_count(root_struct **root_pt, int entries);
+//given a fat table index and a file struct entry this function builds the files cluster list
+//returns the number of cluster's that a file occupies
+int build_cluster_list(off_t data_start, file_struct *file, unsigned short first, fat_struct **fat_pt);
+//given a fat entry returns the corresponding address w.r.t start of image
+off_t create_address(off_t data_start, ushort entry);
+//given a file struct read the file contents from image into struct
+//returns the number of clusters read
+int read_file_data(int fd, int cluster_bytes, file_struct *file);
+int allocate_file(file_struct *file, fat_struct **fat_pt, ushort first_cluster, int cluster_bytes);
+
+//constants
+extern const unsigned char MSK_RD_ONLY;
+extern const unsigned char MSK_HIDDEN;
+extern const unsigned char MSK_SYSTEM;
+extern const unsigned char MSK_ARCH;
+extern const unsigned char MSK_VOLUME;
+extern const unsigned char MSK_SUBDIR;
+
 #endif
 //PROJ_3_FLOPPY_H
