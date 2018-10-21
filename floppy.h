@@ -89,12 +89,24 @@ int read_fat(int fd, boot_struct *bs_pt, fat_struct **fat_pt);
 int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt);
 
 //TODO: write documentation for read_file
-int read_files(int fd, int entries, off_t data_start, int cluster_bytes, file_struct **f_pt, root_struct **rt_pt, fat_struct **fat_pt);
+int read_files(int fd,
+               int entries,
+               off_t data_start,
+               int cluster_bytes,
+               file_struct **f_pt,
+               root_struct **rt_pt,
+               fat_struct **fat_pt);
 
 //functions called by user commands
 void fn_help();
-int fn_fmount(int * fd, char * fname);
-int fn_umount(int fd, char *fname);
+int fn_fmount(int *fd, char *fname);
+int fn_umount(int *fd,
+              char *fname,
+              int max[3],
+              boot_struct *boot,
+              fat_struct **fat1,
+              root_struct **root,
+              file_struct **files);
 int fn_structure(boot_struct *bs_pt);
 int fn_showsector(int fd, long sector_num, boot_struct *boot_pt);
 int fn_showfat(fat_struct **fat_pt);
@@ -106,6 +118,7 @@ int read_two_byte_hex_num(int fd);
 unsigned long read_ulong(const unsigned char *bytes, size_t pos);
 unsigned short read_ushort(const unsigned char *bytes, size_t pos);
 void get_attributes(unsigned char att_byte, char *string);
+//returns 1 if attribute is on, 0 if attribute is off
 int check_mask(unsigned char att_byte, unsigned char mask);
 int create_date(struct tm *date, unsigned char *bytes, size_t position);
 int create_time(struct tm *time, unsigned char *bytes, size_t position);
@@ -116,13 +129,19 @@ int check_dir_contents(fat_struct **fat_pt, unsigned short fat_cluster, int fd);
 int get_file_count(root_struct **root_pt, int entries);
 //given a fat table index and a file struct entry this function builds the files cluster list
 //returns the number of cluster's that a file occupies
-int build_cluster_list(off_t data_start, file_struct *file, unsigned short first, fat_struct **fat_pt);
+int build_cluster_list(off_t data_start,
+                       file_struct *file,
+                       unsigned short first,
+                       fat_struct **fat_pt);
 //given a fat entry returns the corresponding address w.r.t start of image
 off_t create_address(off_t data_start, ushort entry);
 //given a file struct read the file contents from image into struct
 //returns the number of clusters read
 int read_file_data(int fd, int cluster_bytes, file_struct *file);
-int allocate_file(file_struct *file, fat_struct **fat_pt, ushort first_cluster, int cluster_bytes);
+int allocate_file(file_struct *file,
+                  fat_struct **fat_pt,
+                  ushort first_cluster,
+                  int cluster_bytes);
 
 //constants
 extern const unsigned char MSK_RD_ONLY;

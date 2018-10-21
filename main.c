@@ -17,9 +17,6 @@ boot_struct *boot;
 fat_struct **fat1;
 root_struct **root;
 file_struct **files;
-int max_entries = 0;
-int max_fat_entries = 0;
-int max_files = 0;
 
 //TODO: read data from image and fill fat2
 //TODO: compare contents of fat1 and fat2
@@ -36,6 +33,7 @@ int main()
     int root_entries = 0;
     int file_count = 0;
     int cluster_bytes = 0;
+    int max[3];
 
     //command names
     char *help = "help\0";
@@ -85,8 +83,17 @@ int main()
         /////////////////////////
         else if( strncmp(input[0], fmount, 6) == 0){
             //TODO: check if fd has already been set, if it is return an error message.
+            if(fd != 0){
+                printf("Image, %s, is mounted. Please run umount!\n", fname);
+                continue;
+            }
             strcpy(fname, input[1]);
-            fn_fmount(&fd, fname);
+            //error checking for valid filename
+            if(fn_fmount(&fd, fname) == 0){//user entered valid filename, process the image.
+                ;
+            } else{ //file not found, reprint floppy prompt.
+                continue;
+            }
             ///sequence of operations for each structure is as follows
             ///allocate heap storage for struct.
             ///read data from image file, organize and copy it into struct.
@@ -104,11 +111,10 @@ int main()
             //////////////
             ///fat_struct/
             //////////////
-            //keep track of max size of fat to free correct amount of memory when closing
+            //keep track of size of fat to free correct amount of memory when umounting
             fat_entries = boot->num_sectors_fat * boot->num_bytes_per_sector / 3;
-            if(fat_entries > max_fat_entries){
-                max_fat_entries = fat_entries;
-            }
+            max[0] = fat_entries;
+
             //allocate heap storage for fat
             fat1 = (fat_struct **) malloc( fat_entries * sizeof(fat_struct *));
             //allocate heap storage for fat array
@@ -121,11 +127,9 @@ int main()
             ///////////////
             ///root_struct/
             ///////////////
-            //keep track of max size of root to free correct amount of memory when closing
+            //keep track of size of root to free correct amount of memory when umounting
             root_entries = boot->num_root_entries;
-            if(root_entries > max_entries){
-                max_entries = root_entries;
-            }
+            max[1] = root_entries;
             //allocate heap storage for root array
             root = (root_struct **) malloc(root_entries * sizeof(root_struct *));
             for(int i = 0; i < root_entries; i++){
@@ -137,14 +141,13 @@ int main()
             ///////////////
             ///file_struct/
             ///////////////
-            //TODO: ensure that this calculation for the start of the data sector is correct
-
+            //calculate where the data sector starts
             data_start = (boot->num_sectors_fat * boot->num_fat + boot->num_reserved_sectors + (root_entries * 32)/boot->num_bytes_per_sector * 1) * boot->num_sectors_per_cluster;
+            //calculate number of bytes per cluster
             cluster_bytes = boot->num_sectors_per_cluster * boot->num_bytes_per_sector;
-            //keep track of max size of files to free correct amount of memory when closing
-            if((file_count = get_file_count(root, root_entries)) > max_files){
-                max_files = file_count;
-            }
+            //keep track of size of files to free correct amount of memory when umounting
+            file_count = get_file_count(root, root_entries);
+            max[2] = file_count;
             //allocate heap storage for files array
             files = (file_struct **) malloc(file_count * sizeof(file_struct));
             for(int i = 0; i < file_count; i++){
@@ -153,7 +156,7 @@ int main()
             //read data from disk image into files array
             int files_alloced = read_files(fd, root_entries, data_start, cluster_bytes, files, root, fat1);
             if( files_alloced != file_count){
-               printf("allocation error: %d\n", max_files - files_alloced);
+               printf("allocation error: %d\n", file_count - files_alloced);
             }
         }
         ///////////////////////////
@@ -164,14 +167,14 @@ int main()
                 //check if given argument matches currently open fd
                 if(strcmp(input[1], fname) == 0){
                     //match: proceed with umount
-                    fn_umount(fd, fname);
+                    fn_umount(&fd, fname, max, boot, fat1, root, files);
                 } else{ //no match: print error message
                     printf("%s %s\n%s", input[1],
                            "is not currently mounted.",
                            "hint: no argument is required for this command\n");
                 }
             } else{
-                fn_umount(fd, fname);
+                fn_umount(&fd, fname, max, boot, fat1, root, files);
             }
         }
         /////////////////////////////////////////
@@ -220,6 +223,10 @@ int main()
         ///quit program//
         /////////////////
         else if( strncmp(input[0], quit, 4) == 0){
+            if(fd != 0){
+                //if an image remains mounted, call umount now.
+                fn_umount(&fd, fname, max, boot, fat1, root, files);
+            }
             break;
         }
         ////////////////////////////
@@ -231,24 +238,5 @@ int main()
         ///////////////////////////////////////
         else{printf("please re-try your command\n");}
     }
-    //@rj-pe TODO: free all dynamically allocated mem (FAT2)
-    free(boot);
-    for(int i =0; i < max_fat_entries; i++){
-        free(fat1[i]);
-    }
-    free(fat1);
-    for(int i = 0; i < max_entries; i++){
-        free(root[i]);
-    }
-    free(root);
-    for(int i = 0; i < max_files; i++){
-        free(files[i]->cluster_list);
-        free(files[i]->data);
-    }
-    for(int i = 0; i < max_files; i++){
-        free(files[i]);
-    }
-    free(files);
-    close(fd);
     exit( 0);
 }

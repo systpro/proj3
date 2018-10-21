@@ -32,14 +32,44 @@ int fn_fmount(int * fd, char * fname)
     *fd = open(fname, O_RDONLY);
     if(*fd < 0 ){
         printf("%s\n", strerror(errno));
+        return -1;
     }
     return 0;
 }
 
 //description of function
-int fn_umount(int fd, char *fname)
+int fn_umount(int *fd,
+              char *fname,
+              int max[3],
+              boot_struct *boot,
+              fat_struct **fat1,
+              root_struct **root,
+              file_struct **files)
 {
-    close(fd);
+    //@rj-pe TODO: free all dynamically allocated mem (FAT2)
+    int max_fat, max_root, max_files;
+    max_fat = max[0];
+    max_root = max[1];
+    max_files = max[2];
+    free(boot);
+    for(int i =0; i < max_fat; i++){
+        free(fat1[i]);
+    }
+    free(fat1);
+    for(int i = 0; i < max_root; i++){
+        free(root[i]);
+    }
+    free(root);
+    for(int i = 0; i < max_files; i++){
+        free(files[i]->cluster_list);
+        free(files[i]->data);
+    }
+    for(int i = 0; i < max_files; i++){
+        free(files[i]);
+    }
+    free(files);
+    close(*fd);
+    *fd = 0;
     memset(fname, 0, sizeof(fname));
     return 0;
 }
@@ -169,7 +199,7 @@ int fn_structure(boot_struct *bs_pt)
 //prints a hex dump of a given file return -1 if file not found
 int fn_showfile(file_struct **files, int file_count, char *filename)
 {
-    //loop through filenames searching for a match
+    //loop through files, search for a name match.
     int i = 0;
     while(i < file_count){
         if(strcmp(files[i]->filename, filename) == 0){
@@ -185,13 +215,13 @@ int fn_showfile(file_struct **files, int file_count, char *filename)
         //TODO: print header row
         int sidebar = 0x0;
         for(int g = 0; g < files[i]->length; g++ ){
-            //print sidebar
+            //print sidebar at beginning of row.
             if( g % 16 == 0){
                 printf("%X0\t\t", sidebar++);
             }
-            //print data
+            //print file data.
             printf("%X\t", files[i]->data[g]);
-            //print newline
+            //print newline at end of row.
             if(((g+1) % 16 == 0) && ( g > 1)){
                 printf("\n");
             }
@@ -475,8 +505,8 @@ int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt)
         for (int j = i*32, k = 0; k < 32; j++, k++) {
             buf[k] = raw_root[j];
         }
-        //check for special values in first byte
-        if(buf[0] == 0x00){
+        //check for special (free space or file deleted) values in first byte of entry
+        if((buf[0] == 0x00) || (buf[0] == 0xE5)) {
             rt_pt[i]->available = 1;
             continue;
         }
@@ -485,9 +515,11 @@ int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt)
         rt_pt[i]->file_size = read_ulong(&buf[0], 28);
         //extract attributes from raw data.
         rt_pt[i]->attribute = buf[11];
-        if((rt_pt[i]->file_size == 0) && ! check_mask(rt_pt[i]->attribute, MSK_SUBDIR)){
+        //skip empty files that are not subdirectories
+        if((rt_pt[i]->file_size == 0) && (!check_mask(rt_pt[i]->attribute, MSK_SUBDIR))){
             continue;
         }
+        //skip hidden files
         if(check_mask(rt_pt[i]->attribute, MSK_HIDDEN)) {
             continue;
         }
@@ -496,7 +528,8 @@ int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt)
         strncpy(rt_pt[i]->filename, (char *) &buf[0], 8);
         //extract extension from raw data
         strncpy(rt_pt[i]->extension, (char *) &buf[8], 3);
-        if((rt_pt[i]->extension[0] != 0) && (! check_mask(rt_pt[i]->attribute, MSK_SUBDIR))) {
+        //combine filename and extension fields into filename field for non-directory files
+        if((rt_pt[i]->extension[0] != 0) && (!check_mask(rt_pt[i]->attribute, MSK_SUBDIR))) {
             if(strchr(rt_pt[i]->filename, 32) != NULL){
             strncpy(strchr(rt_pt[i]->filename, 32), ".", 1);
             } else{
@@ -504,8 +537,14 @@ int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt)
             }
             strncpy(strchr(rt_pt[i]->filename, '.') + 1, ("%s\0", rt_pt[i]->extension), 4);
         }
+        //if a DIR, add null terminator to filename.
+        else if(strchr(rt_pt[i]->filename, 32) != NULL){
+            strncpy(strchr(rt_pt[i]->filename, 32), "\0", 1);
+        }
+        //add a forward slash to the beginning of filename
         memmove(rt_pt[i]->filename + 1, rt_pt[i]->filename, strlen(rt_pt[i]->filename) + 1);
         rt_pt[i]->filename[0] = '/';
+
         //extract creation time from raw data.
         create_time(&rt_pt[i]->creation_time, &buf[0], 14);
         //extract creation date from raw data.
@@ -531,9 +570,12 @@ int read_files(int fd, int entries,
     //loop through root & copy required fields
     for(int i = 0; i < entries; i++){
         if((! rt_pt[i]->available) && (rt_pt[i]->first_logical_cluster > 1)){
+            //allocate memory for the file
             f_pt[entry]->cluster_count =
                     allocate_file(f_pt[entry], fat_pt, rt_pt[i]->first_logical_cluster, cluster_bytes);
+            //maximum number of bytes the file occupies
             f_pt[entry]->length = f_pt[entry]->cluster_count * cluster_bytes;
+            //filename
             strcpy(f_pt[entry]->filename, rt_pt[i]->filename);
             //starting at the first cluster build the files cluster list
             build_cluster_list(data_start, f_pt[entry], rt_pt[i]->first_logical_cluster, fat_pt);
