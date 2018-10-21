@@ -10,6 +10,12 @@
 
 #include "floppy.h"
 
+const unsigned char MSK_RD_ONLY = 0x01;
+const unsigned char MSK_HIDDEN = 0x02;
+const unsigned char MSK_SYSTEM = 0x04;
+const unsigned char MSK_ARCH = 0x20;
+const unsigned char MSK_VOLUME = 0x08;
+const unsigned char MSK_SUBDIR = 0x10;
 ///////////////////////////////////////////////////////////////
 ///////////////// functions called by user commands ///////////
 ///////////////////////////////////////////////////////////////
@@ -59,6 +65,7 @@ int fn_showsector(int fd, long sector_num, boot_struct *boot_pt)
 
     //read and print the raw sector data
     //@rj-pe TODO: remove hardcoding of 512 and replace with num_bytes_per_sector
+    //TODO: read all 512 with a single system call
     unsigned char buf[512];
     unsigned char sidebar = 0x0;
     for(int i = 0; i < 512; i++){
@@ -79,10 +86,9 @@ int fn_showsector(int fd, long sector_num, boot_struct *boot_pt)
     //@rj-pe TODO: clear warning : control reaches end of non-void function
 }
 
-int fn_showfat(fat_struct **fat_pt){
+int fn_showfat(fat_struct **fat_pt)
+{
 
-    /* TODO: Format this table properly. The correct information is displayed, but formatting is bad.
-    */
     // print header
     printf("   ");
     for(unsigned char header = 0x0; header <= 0xF; header++){
@@ -117,24 +123,21 @@ int fn_showfat(fat_struct **fat_pt){
     return 0;
 }
 
-int fn_traverse(root_struct **root_pt, int entries, fat_struct **fat_pt)
+int fn_traverse(root_struct **root_pt, int entries, fat_struct **fat_pt, int fd)
 {
-    //unsigned char msk_rd_only = 0x01;
-    unsigned char msk_hidden = 0x02;
-    //unsigned char msk_system = 0x04;
-    //unsigned char msk_arch = 0x20;
-    //unsigned char msk_vol_label = 0x08;
-    unsigned char msk_subdir = 0x10;
     //TODO: sort files and directories alphabetically before printing
     //TODO: figure out how nested directories work
 
     for(int i = 0; i < entries; i++ ){
-        if( (! check_mask(root_pt[i]->attribute, msk_hidden)) && (! root_pt[i]->available) ) {
-            if( check_mask(root_pt[i]->attribute, msk_subdir)){
-                int entries = check_dir_contents(fat_pt, root_pt[i]->first_logical_cluster);
-                printf("/%s\t<DIR>\n", root_pt[i]->filename);
+        if( (! check_mask(root_pt[i]->attribute, MSK_HIDDEN)) && (! root_pt[i]->available) ) {
+
+            if( check_mask(root_pt[i]->attribute, MSK_SUBDIR)){
+                int rename_this_variable = check_dir_contents(fat_pt, root_pt[i]->first_logical_cluster, fd);
+
+                printf("%s\t<DIR>\n", root_pt[i]->filename);
             } else {
-                printf("/%s.%s\n", root_pt[i]->filename, root_pt[i]->extension);
+
+                printf("%s\n", root_pt[i]->filename);
             }
         }
     }
@@ -163,21 +166,127 @@ int fn_structure(boot_struct *bs_pt)
     //@rj-pe TODO: clear warning : control reaches end of non-void function
 }
 
+//prints a hex dump of a given file return -1 if file not found
+int fn_showfile(file_struct **files, int file_count, char *filename)
+{
+    //loop through filenames searching for a match
+    int i = 0;
+    while(i < file_count){
+        if(strcmp(files[i]->filename, filename) == 0){
+            break;
+        } else {
+            i++;
+        }
+    }
+    //TODO : should i be greater than?
+    if(i == file_count){
+        return -1;
+    } else{
+        //TODO: print header row
+        int sidebar = 0x0;
+        for(int g = 0; g < files[i]->length; g++ ){
+            //print sidebar
+            if( g % 16 == 0){
+                printf("%X0\t\t", sidebar++);
+            }
+            //print data
+            printf("%X\t", files[i]->data[g]);
+            //print newline
+            if(((g+1) % 16 == 0) && ( g > 1)){
+                printf("\n");
+            }
+        }
+        return i;
+    }
+}
+
 ///////////////////////////////////////////////////////////////
 /////////////// utility functions /////////////////////////////
 ///////////////////////////////////////////////////////////////
 
-int check_dir_contents(fat_struct **fat_pt, unsigned short first_cluster){
+int allocate_file(file_struct *file, fat_struct **fat_pt, ushort first_cluster, int cluster_bytes)
+{
+    //allocate cluster list
+    int clusters = 0;
+    //look ahead to obtain the cluster list allocation size
+    for(ushort i = first_cluster; i < 0xFF0; i = fat_pt[(int)i]->address) {
+        clusters ++;
+    }
+    //allocate memory for cluster list
+    file->cluster_list = (list *) calloc((size_t) clusters, sizeof(list ));
+    //allocate memory for file data
+    file->data = (unsigned char *) calloc((size_t) clusters * cluster_bytes, sizeof(unsigned char));
+    return clusters;
+}
+
+int read_file_data(int fd, int cluster_bytes, file_struct *file)
+{
+    if(file->length == 0){
+        return 0;
+    }
+    int clusters = 0;
+    //loop through the cluster addresses in cluster list
+    for(off_t i = file->cluster_list[clusters].address; clusters < file->cluster_count; ++clusters){
+        //set the file offset to cluster address
+        lseek(fd, i * cluster_bytes, SEEK_SET);
+        //read contents of cluster into buffer
+        read(fd, &file->data[clusters * cluster_bytes], (size_t) cluster_bytes);
+        i = file->cluster_list[clusters].next;
+    }
+    return clusters;
+}
+
+off_t create_address(off_t start, ushort convert)
+{
+    return start + (off_t) convert - 2;
+}
+
+int build_cluster_list(off_t data_start, file_struct *file, ushort first, fat_struct **fat_pt)
+{
+    //for every fat entry in chain add corresponding data to cluster list
+    int clusters = file->cluster_count;
+    ushort i = first;
+    for(ushort a = 0; i < 0xFF0; i = fat_pt[i]->address, a++){
+        file->cluster_list[a].address = create_address(data_start, i);
+        if(a < clusters - 1) {
+            file->cluster_list[a].next = create_address(data_start, fat_pt[i]->address);
+        } //the last cluster in a file has a null value in next
+        else if(a == clusters - 1){
+            file->cluster_list[a].next = 0;
+        }
+    }
+    return 0;
+}
+
+int get_file_count(root_struct **rt_pt, int entries)
+{
+    int file_count = 0;
+    ///loop through root dir and save any entries that contain a valid file return count of valid files
+    for(int i = 0; i < entries; i++){
+        if(! rt_pt[i]->available && (rt_pt[i]->first_logical_cluster > 1)){
+            file_count ++;
+        }
+    }
+    return file_count;
+}
+
+int check_dir_contents(fat_struct **fat_pt, unsigned short first_cluster, int fd)
+{
     int entries = 0;
+    //hardcoding of 33 is not optimal. Replace with call to the proper variables from a boot_sector pt
+    off_t address = 33 + first_cluster - 2;
+    lseek(fd, address, SEEK_SET);
     fat_pt[first_cluster];
     return entries;
 }
 
-void print_dir(root_struct **root_pt, int entries){
-    unsigned char msk_subdir = 0x10;
+void print_dir(root_struct **root_pt, int entries)
+{
     for(int i =0; i < entries; i++){
-        if(check_mask( root_pt[i]->attribute, msk_subdir)){
-            printf("%s%d\n",root_pt[i]->filename, root_pt[i]->first_logical_cluster);
+        if(check_mask( root_pt[i]->attribute, MSK_SUBDIR)){
+            printf("%s%d\n",
+                   root_pt[i]->filename,
+                   root_pt[i]->first_logical_cluster);
         }
     }
 }
@@ -233,27 +342,20 @@ int check_mask(unsigned char att_byte, unsigned char mask)
 {
     return (att_byte & mask);
 }
-//given the attribute field (stored in the root_struct entries) this function returns
-//a print ready string
+//given the attribute field (stored in the root_struct entries)
+// this function returns a print ready string
 void get_attributes(unsigned char att_byte, char *string)
 {
-    unsigned char msk_rd_only = 0x01;
-    unsigned char msk_hidden = 0x02;
-    unsigned char msk_system = 0x04;
-    unsigned char msk_arch = 0x20;
-    //char msk_vol_label = 0x08;
-    //char msk_subdir = 0x10;
-
-    if(check_mask(att_byte, msk_rd_only) == 1){
+    if(check_mask(att_byte, MSK_RD_ONLY) == 1){
         string[1] = 'R';
     }
-    if(check_mask(att_byte, msk_system) == 1){
+    if(check_mask(att_byte, MSK_SYSTEM) == 1){
         string[2] = 'S';
     }
-    if(check_mask(att_byte, msk_hidden) == 1){
+    if(check_mask(att_byte, MSK_HIDDEN) == 1){
         string[3] = 'H';
     }
-    if(check_mask(att_byte, msk_arch) == 1){
+    if(check_mask(att_byte, MSK_ARCH) == 1){
         string[4] = 'A';
     }
 }
@@ -322,7 +424,8 @@ int read_boot(int fd, boot_struct *bs_pt)
     return 0;
 }
 
-int read_fat(int fd, boot_struct *bs_pt ,fat_struct **fat_pt){
+int read_fat(int fd, boot_struct *bs_pt ,fat_struct **fat_pt)
+{
     int nsf = bs_pt->num_sectors_fat;
     int bps = bs_pt->num_bytes_per_sector;
     int fat1_size = bps * bs_pt->num_reserved_sectors;
@@ -342,7 +445,9 @@ int read_fat(int fd, boot_struct *bs_pt ,fat_struct **fat_pt){
         buf[1] = raw_fat[i*3+1];
         buf[2] = raw_fat[i*3+2];
         /*parse three bytes into two fat1_size entries*/
-        fat_pt[i*2]->address = (((unsigned short) buf[1] & 0x0Fu) << 8u ) | ((unsigned short) buf[0]);
+        fat_pt[i*2]->address =
+                (((unsigned short) buf[1] & 0x0Fu) << 8u ) |
+                ((unsigned short) buf[0]);
         fat_pt[i*2+1]->address= (((unsigned short) buf[2]) << 4u)|(((unsigned short) buf[1]) >> 4u);
     }
     return 0;
@@ -360,7 +465,6 @@ int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt)
     int sde = 32;
     unsigned char raw_root[nre * sde];
     unsigned char buf[32];
-    unsigned char msk_subdir = 0x10;
 
     //read raw root data from image into a buffer
     lseek(fd, root_pos, SEEK_SET);
@@ -377,25 +481,31 @@ int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt)
             continue;
         }
         rt_pt[i]->available = 0;
-        //extract filename from raw data bytes 0-8
-        strncpy(rt_pt[i]->filename, (char *) &buf[0], 8);
-        //replace \0 's with padding
-        for(int s = 0; s < 8; s++) {
-            if(rt_pt[i]->filename[s] == 0){
-                rt_pt[i]->filename[s] = 0x20;
-            }
-        }
-        //CHECK: does filename include a null terminator?
-        //extract extension from raw data
-        strncpy(rt_pt[i]->extension, (char *) &buf[8], 3);
-        //replace \0 's with padding
-        for(int s = 0; s < 3; s++) {
-            if(rt_pt[i]->extension[s] == 0){
-                rt_pt[i]->extension[s] = 0x20;
-            }
-        }
+        //extract file size from raw data.
+        rt_pt[i]->file_size = read_ulong(&buf[0], 28);
         //extract attributes from raw data.
         rt_pt[i]->attribute = buf[11];
+        if((rt_pt[i]->file_size == 0) && ! check_mask(rt_pt[i]->attribute, MSK_SUBDIR)){
+            continue;
+        }
+        if(check_mask(rt_pt[i]->attribute, MSK_HIDDEN)) {
+            continue;
+        }
+
+        //extract filename from raw data bytes 0-8
+        strncpy(rt_pt[i]->filename, (char *) &buf[0], 8);
+        //extract extension from raw data
+        strncpy(rt_pt[i]->extension, (char *) &buf[8], 3);
+        if((rt_pt[i]->extension[0] != 0) && (! check_mask(rt_pt[i]->attribute, MSK_SUBDIR))) {
+            if(strchr(rt_pt[i]->filename, 32) != NULL){
+            strncpy(strchr(rt_pt[i]->filename, 32), ".", 1);
+            } else{
+                strncpy(strchr(rt_pt[i]->filename, 0), ".", 1);
+            }
+            strncpy(strchr(rt_pt[i]->filename, '.') + 1, ("%s\0", rt_pt[i]->extension), 4);
+        }
+        memmove(rt_pt[i]->filename + 1, rt_pt[i]->filename, strlen(rt_pt[i]->filename) + 1);
+        rt_pt[i]->filename[0] = '/';
         //extract creation time from raw data.
         create_time(&rt_pt[i]->creation_time, &buf[0], 14);
         //extract creation date from raw data.
@@ -408,8 +518,33 @@ int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt)
         create_date(&rt_pt[i]->last_write_date, &buf[0], 24);
         //extract first logical cluster from raw data.
         rt_pt[i]->first_logical_cluster = read_ushort(&buf[0], 26);
-        //extract file size from raw data.
-        rt_pt[i]->file_size = read_ulong(&buf[0], 28);
     }
     return 0;
+}
+
+int read_files(int fd, int entries,
+               off_t data_start, int cluster_bytes,
+               file_struct **f_pt, root_struct **rt_pt,
+               fat_struct **fat_pt)
+{
+    int entry = 0;
+    //loop through root & copy required fields
+    for(int i = 0; i < entries; i++){
+        if((! rt_pt[i]->available) && (rt_pt[i]->first_logical_cluster > 1)){
+            f_pt[entry]->cluster_count =
+                    allocate_file(f_pt[entry], fat_pt, rt_pt[i]->first_logical_cluster, cluster_bytes);
+            f_pt[entry]->length = f_pt[entry]->cluster_count * cluster_bytes;
+            strcpy(f_pt[entry]->filename, rt_pt[i]->filename);
+            //starting at the first cluster build the files cluster list
+            build_cluster_list(data_start, f_pt[entry], rt_pt[i]->first_logical_cluster, fat_pt);
+            //read the file data from image data sectors
+            if(f_pt[entry]->cluster_count == read_file_data(fd, cluster_bytes, f_pt[entry])){
+                entry++;
+                continue;
+            } else{
+                printf("error reading file %s", f_pt[entry]->filename);
+            }
+        }
+    }
+    return entry;
 }
