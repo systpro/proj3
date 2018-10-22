@@ -3,5 +3,5 @@ project(proj_3 C)
 
 set(CMAKE_C_STANDARD 99)
 
-add_executable(proj_3 main.c floppy.h floppy.c)
+add_executable(proj_3 main.c floppy.h floppy.c data_structures.h)
 target_link_libraries(proj_3 m)

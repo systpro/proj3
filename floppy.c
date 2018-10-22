@@ -8,7 +8,9 @@
 #include <errno.h>
 #include <math.h>
 
+
 #include "floppy.h"
+#include "data_structures.h"
 
 const unsigned char MSK_RD_ONLY = 0x01;
 const unsigned char MSK_HIDDEN = 0x02;
@@ -16,6 +18,10 @@ const unsigned char MSK_SYSTEM = 0x04;
 const unsigned char MSK_ARCH = 0x20;
 const unsigned char MSK_VOLUME = 0x08;
 const unsigned char MSK_SUBDIR = 0x10;
+
+off_t arr_dir_visited[32];
+int dirs_visited;
+
 ///////////////////////////////////////////////////////////////
 ///////////////// functions called by user commands ///////////
 ///////////////////////////////////////////////////////////////
@@ -153,7 +159,7 @@ int fn_showfat(fat_struct **fat_pt)
     return 0;
 }
 
-int fn_traverse(root_struct **root_pt, int entries, fat_struct **fat_pt, int fd)
+int fn_traverse(root_struct **root_pt, int entries, fat_struct **fat_pt, int fd, int l_flag)
 {
     //TODO: sort files and directories alphabetically before printing
     //TODO: figure out how nested directories work
@@ -233,6 +239,93 @@ int fn_showfile(file_struct **files, int file_count, char *filename)
 ///////////////////////////////////////////////////////////////
 /////////////// utility functions /////////////////////////////
 ///////////////////////////////////////////////////////////////
+
+void prepend_abs_path(root_struct **root, char *abs_path, int start, int end){
+    for(int i = start; i < end; i++){
+        char temp[19];
+        strcpy(temp,"\0");
+        strcat(temp, abs_path);
+        strcat(temp, root[i]->filename);
+        strcpy(root[i]->filename, temp);
+    }
+}
+
+int count_root_entries(int fd, off_t cluster, int cluster_bytes)
+{
+    unsigned char buf[cluster_bytes/32];
+    int pos = 32;
+    int i = 0;
+    do{
+        lseek(fd, cluster * cluster_bytes + (pos * i), SEEK_SET);
+        read(fd, &buf[i++], 1);
+    } while(buf[i-1] != 0x00);
+
+    return i;
+}
+
+int add_dirs_to_stack(stack *dirs,
+                      file_struct **files,
+                      char *abs_path,
+                      int file_count)
+{
+    int dirs_added = 0;
+    // Check stack for and add to stack new directories.
+    if(dirs->top){
+        for (int i = 0; i < file_count; i++) {
+            if(files[i]->directory) {
+                int g = 0;
+                for(int j = 0; j < dirs_visited; j++){
+                    if(arr_dir_visited[j] == files[i]->cluster_list[0].address)
+                    break;
+                }
+                for (; g < dirs->top; g++) {
+                    if(dirs->dirs[g] == files[i]->cluster_list[0].address){
+                        break;
+                    }
+                }
+                if(g == dirs->top){
+                    // Record path of directory
+                    strcpy(abs_path, files[i]->filename);
+                    dirs_added += push(dirs, files[i]->cluster_list[0].address);
+                }
+            }
+        }
+    } else{ // Stack is empty add all directories not already visited.
+        for(int i = 0; i < file_count; i++){
+            if(files[i]->directory){
+                int j = 0;
+                for(; j < dirs_visited; j++){
+                    if(arr_dir_visited[j] == files[i]->cluster_list[0].address)
+                        break;
+                }
+                if(j == dirs_visited){
+                    strcpy(abs_path, files[i]->filename);
+                    dirs_added += push(dirs, files[i]->cluster_list[0].address);
+                }
+            }
+        }
+    }
+    return dirs_added;
+}
+
+int push(stack *s, off_t dir){
+    if(s->top == s->max_size){
+        return -1;
+    } else{
+      s->dirs[s->top] = dir;
+      s->top++;
+      return 1;
+    }
+}
+
+off_t pop(stack *s){
+    if(s->top == 0){
+        return -1;
+    } else{
+        s->top--;
+        return s->dirs[s->top];
+    }
+}
 
 int allocate_file(file_struct *file, fat_struct **fat_pt, ushort first_cluster, int cluster_bytes)
 {
@@ -372,8 +465,7 @@ int check_mask(unsigned char att_byte, unsigned char mask)
 {
     return (att_byte & mask);
 }
-//given the attribute field (stored in the root_struct entries)
-// this function returns a print ready string
+
 void get_attributes(unsigned char att_byte, char *string)
 {
     if(check_mask(att_byte, MSK_RD_ONLY) == 1){
@@ -483,14 +575,25 @@ int read_fat(int fd, boot_struct *bs_pt ,fat_struct **fat_pt)
     return 0;
 }
 
-int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt)
+int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt, off_t *dir_flag)
 {
-    int nf = bs_pt->num_fat;
-    int bps = bs_pt->num_bytes_per_sector;
-    int nsf = bs_pt->num_sectors_fat;
-    int nrs = bs_pt->num_reserved_sectors;
-    int nre = bs_pt->num_root_entries;
-    int root_pos = nf * bps * nsf + nrs * bps;
+    off_t root_pos = 0;
+    int nre = 0;
+    int i = 0;
+    if(!dir_flag){
+        int nf = bs_pt->num_fat;
+        int bps = bs_pt->num_bytes_per_sector;
+        int nsf = bs_pt->num_sectors_fat;
+        int nrs = bs_pt->num_reserved_sectors;
+        nre = bs_pt->num_root_entries;
+        root_pos = nf * bps * nsf + nrs * bps;
+    }
+    else if(dir_flag){
+        root_pos = dir_flag[0] * bs_pt->num_bytes_per_sector ;
+        nre = (int) dir_flag[1];
+        i = (int) dir_flag[2];
+    }
+
     //TODO: is the size of a dir. entry constant across all custom FAT configs?
     int sde = 32;
     unsigned char raw_root[nre * sde];
@@ -500,10 +603,17 @@ int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt)
     lseek(fd, root_pos, SEEK_SET);
     read(fd, raw_root, (size_t) nre*sde);
     //loop through raw data 32 bytes at a time
-    for(int i = 0; i < nre; i++) {
+    for(int l = 0; l < nre; i++, l++) {
         //for ease of access temporarily store the next 32 bytes
-        for (int j = i*32, k = 0; k < 32; j++, k++) {
-            buf[k] = raw_root[j];
+        if(!dir_flag) {
+            for (int j = i * 32, k = 0; k < 32; j++, k++) {
+                buf[k] = raw_root[j];
+            }
+        }
+        else if(dir_flag){
+            for(int j = l * 32, k = 0; k < 32; j++, k++ ){
+                buf[k] = raw_root[j];
+            }
         }
         //check for special (free space or file deleted) values in first byte of entry
         if((buf[0] == 0x00) || (buf[0] == 0xE5)) {
@@ -529,7 +639,7 @@ int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt)
         //extract extension from raw data
         strncpy(rt_pt[i]->extension, (char *) &buf[8], 3);
         //combine filename and extension fields into filename field for non-directory files
-        if((rt_pt[i]->extension[0] != 0) && (!check_mask(rt_pt[i]->attribute, MSK_SUBDIR))) {
+        if((rt_pt[i]->extension[0] != 0) && (rt_pt[i]->extension[0] != 32)  && (!check_mask(rt_pt[i]->attribute, MSK_SUBDIR))) {
             if(strchr(rt_pt[i]->filename, 32) != NULL){
             strncpy(strchr(rt_pt[i]->filename, 32), ".", 1);
             } else{
@@ -562,13 +672,22 @@ int read_root(int fd, boot_struct *bs_pt, root_struct **rt_pt)
 }
 
 int read_files(int fd, int entries,
-               off_t data_start, int cluster_bytes,
-               file_struct **f_pt, root_struct **rt_pt,
+               off_t data_start,
+               int cluster_bytes,
+               off_t *dir_flag,
+               file_struct **f_pt,
+               root_struct **rt_pt,
                fat_struct **fat_pt)
 {
     int entry = 0;
+    int i = 0;
+    if(dir_flag){
+        entry = (int) dir_flag[1];
+        i = (int) dir_flag[2];
+    }
+
     //loop through root & copy required fields
-    for(int i = 0; i < entries; i++){
+    for(; i < entries; i++){
         if((! rt_pt[i]->available) && (rt_pt[i]->first_logical_cluster > 1)){
             //allocate memory for the file
             f_pt[entry]->cluster_count =
@@ -577,8 +696,23 @@ int read_files(int fd, int entries,
             f_pt[entry]->length = f_pt[entry]->cluster_count * cluster_bytes;
             //filename
             strcpy(f_pt[entry]->filename, rt_pt[i]->filename);
+            //set directory flag
+            if(check_mask(rt_pt[i]->attribute, MSK_SUBDIR)){
+                f_pt[entry]->directory = 1;
+            } else{
+                f_pt[entry]->directory = 0;
+            }
             //starting at the first cluster build the files cluster list
             build_cluster_list(data_start, f_pt[entry], rt_pt[i]->first_logical_cluster, fat_pt);
+
+            // Check for . entry
+            if(dir_flag) {
+                if ((f_pt[entry]->directory) && (f_pt[entry]->cluster_list[0].address == dir_flag[0])) {
+                    entry++;
+                    continue;
+                }
+            }
+
             //read the file data from image data sectors
             if(f_pt[entry]->cluster_count == read_file_data(fd, cluster_bytes, f_pt[entry])){
                 entry++;

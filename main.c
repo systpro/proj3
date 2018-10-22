@@ -4,9 +4,12 @@
 #include <errno.h>
 #include <zconf.h>
 #include <stdlib.h>
+#include <sys/types.h>
 
 
 #include "floppy.h"
+#include "data_structures.h"
+
 /**
  * @brief Data from boot sector of floppy organized into a struct.
  *
@@ -17,6 +20,9 @@ boot_struct *boot;
 fat_struct **fat1;
 root_struct **root;
 file_struct **files;
+stack directories;
+int dirs_visited = 0;
+off_t arr_dir_visited[32];
 
 //TODO: read data from image and fill fat2
 //TODO: compare contents of fat1 and fat2
@@ -33,7 +39,10 @@ int main()
     int root_entries = 0;
     int file_count = 0;
     int cluster_bytes = 0;
+    char mount_flag = 0;
     int max[3];
+    directories.top = 0;
+    directories.max_size = 32;
 
     //command names
     char *help = "help\0";
@@ -72,15 +81,15 @@ int main()
             //are floppy image names going to be extraordinarily long?
             else{printf("command exceeds maximum input length\n");}
         }
-        /////////////////////////
-        ///display help message//
-        /////////////////////////
+        //////////////////////////
+        /// display help message//
+        //////////////////////////
         if( strncmp(input[0], help, 4) == 0 ){
             fn_help();
         }
-        /////////////////////////
-        ///mount the filesystem//
-        /////////////////////////
+        //////////////////////////
+        /// mount the filesystem//
+        //////////////////////////
         else if( strncmp(input[0], fmount, 6) == 0){
             //TODO: check if fd has already been set, if it is return an error message.
             if(fd != 0){
@@ -100,17 +109,17 @@ int main()
             //@rj-pe TODO: allocate memory for FAT 2 struct.
             //@rj-pe TODO: perform read and copy operations on FAT 2.
 
-            ///////////////
-            ///boot struct/
-            ///////////////
+            ////////////////
+            /// boot struct/
+            ////////////////
             //allocate heap storage for boot
             boot = (boot_struct*) calloc(1, sizeof(boot_struct));
             //read data from disk image into boot struct
             read_boot(fd, boot);
 
-            //////////////
-            ///fat_struct/
-            //////////////
+            ///////////////
+            /// fat_struct/
+            ///////////////
             //keep track of size of fat to free correct amount of memory when umounting
             fat_entries = boot->num_sectors_fat * boot->num_bytes_per_sector / 3;
             max[0] = fat_entries;
@@ -124,9 +133,9 @@ int main()
             //read data from disk image into fat struct
             read_fat(fd, boot, fat1);
 
-            ///////////////
-            ///root_struct/
-            ///////////////
+            ////////////////
+            /// root_struct/
+            ////////////////
             //keep track of size of root to free correct amount of memory when umounting
             root_entries = boot->num_root_entries;
             max[1] = root_entries;
@@ -136,13 +145,17 @@ int main()
                 root[i] = calloc(1, sizeof(root_struct));
             }
             //read data from disk image into root struct array
-            read_root(fd, boot, root);
+            read_root(fd, boot, root, NULL);
 
-            ///////////////
-            ///file_struct/
-            ///////////////
+            ////////////////
+            /// file_struct/
+            ////////////////
             //calculate where the data sector starts
-            data_start = (boot->num_sectors_fat * boot->num_fat + boot->num_reserved_sectors + (root_entries * 32)/boot->num_bytes_per_sector * 1) * boot->num_sectors_per_cluster;
+            data_start =
+                    ( boot->num_sectors_fat * boot->num_fat
+                     + boot->num_reserved_sectors + (root_entries * 32)
+                     / boot->num_bytes_per_sector * 1 )
+                     * boot->num_sectors_per_cluster;
             //calculate number of bytes per cluster
             cluster_bytes = boot->num_sectors_per_cluster * boot->num_bytes_per_sector;
             //keep track of size of files to free correct amount of memory when umounting
@@ -154,18 +167,75 @@ int main()
                 files[i] = malloc(sizeof(file_struct));
             }
             //read data from disk image into files array
-            int files_alloced = read_files(fd, root_entries, data_start, cluster_bytes, files, root, fat1);
+            int files_alloced
+                    = read_files(fd, root_entries, data_start, cluster_bytes, NULL, files, root, fat1);
             if( files_alloced != file_count){
                printf("allocation error: %d\n", file_count - files_alloced);
             }
+            ////////////////////////////////
+            /// Process nested directories/
+            ////////////////////////////////
+            // Add directory entries to stack.
+            char abs_path[12];
+            if(add_dirs_to_stack(&directories, files, abs_path, file_count)){
+                off_t next = pop(&directories);
+                for(; next > 0; next = pop(&directories)){
+                    // Process each directory's image data.
+
+                    // Figure out how many root entries to add.
+                    int init_root_count = root_entries;
+                    root_entries += count_root_entries(fd, next, cluster_bytes);
+                    max[1] = root_entries;
+                    int add_entries = root_entries - init_root_count;
+                    // Allocate for requisite number of root structs.
+                    root_struct **root_canary = realloc(root, root_entries * sizeof(root_struct *));
+                    if(root_canary != NULL){
+                        root = root_canary;
+                        for(int i = init_root_count; i < root_entries; i++){
+                            root[i] = calloc(1, sizeof(root_struct));
+                        }
+                    }
+                    // Parse dir image data into root structs.
+                    off_t dir_flag[3] = {next, add_entries , init_root_count};
+                    read_root(fd, boot, root, dir_flag);
+                    // Prepend absolute path to filename
+                    prepend_abs_path(root, abs_path, init_root_count, root_entries);
+
+                    // Parse new root structs into file structs.
+                    int init_file_count = file_count;
+                    file_count = get_file_count(root, root_entries);
+                    max[2] = file_count;
+                    // Allocate heap storage for new file structs.
+                    file_struct **files_canary = (file_struct **) realloc(files, file_count * sizeof(file_struct));
+                    if(files_canary != NULL){
+                        files = files_canary;
+                    }
+                    for(int i = init_file_count; i < file_count; i++){
+                        files[i] = malloc(sizeof(file_struct));
+                    }
+                    // Read data from disk image into files array.
+                    dir_flag[1] = init_file_count;
+                    files_alloced
+                            = read_files(
+                                    fd, root_entries, data_start, cluster_bytes, dir_flag, files, root, fat1);
+                    if( files_alloced != file_count){
+                        printf("allocation error: %d\n", file_count - files_alloced);
+                    }
+                    // Add directory to visited list
+                    arr_dir_visited[dirs_visited++] = next;
+                    // Look for new directories
+                    add_dirs_to_stack(&directories, files, abs_path, file_count);
+                }
+            }
+            mount_flag = 1;
         }
-        ///////////////////////////
-        ///unmount the filesystem//
-        ///////////////////////////
+        ////////////////////////////
+        /// unmount the filesystem//
+        ////////////////////////////
         else if( strncmp(input[0], umount, 6) == 0){
             if( strlen(input[1]) != 0) {
                 //check if given argument matches currently open fd
-                if(strcmp(input[1], fname) == 0){
+                if(strcmp(input[1], fname) == 0 && mount_flag){
                     //match: proceed with umount
                     fn_umount(&fd, fname, max, boot, fat1, root, files);
                 } else{ //no match: print error message
@@ -173,19 +243,23 @@ int main()
                            "is not currently mounted.",
                            "hint: no argument is required for this command\n");
                 }
-            } else{
+            }
+            else if(mount_flag)
+            {
                 fn_umount(&fd, fname, max, boot, fat1, root, files);
+            } else{
+                printf("no image mounted!\n");
             }
         }
-        /////////////////////////////////////////
-        ///display structure of the floppy disk//
-        /////////////////////////////////////////
+        ////////////////////////////////////
+        /// display floppy disk structure//
+        ///////////////////////////////////
         else if(strncmp(input[0], structure, 9) == 0){
             fn_structure(boot);
         }
-        /////////////////////////////////////////////////////
-        ///print a hex dump of a given sector of the floppy//
-        /////////////////////////////////////////////////////
+        //////////////////////////////////////////////////////
+        /// print a hex dump of a given sector of the floppy//
+        //////////////////////////////////////////////////////
         else if(strncmp(input[0], showsector, 10) == 0){
             //convert user input to a number
             char *next;
@@ -193,49 +267,48 @@ int main()
             //display the requested sector
             fn_showsector(fd, sector, boot);
         }
-        ////////////////////////////////////////
-        ///show first 256 entries in FAT table//
-        ////////////////////////////////////////
+        //////////////////////////////////////////
+        /// print first 256 entries in FAT table//
+        //////////////////////////////////////////
         else if(strncmp(input[0], showfat, 7) == 0){
             fn_showfat(fat1);
         }
-        ///////////////////////////////////////
-        ///list content in the root directory//
-        ///////////////////////////////////////
+        ////////////////////////////////////////
+        /// list content of the root directory//
+        ////////////////////////////////////////
         //TODO: function is working on a very basic level, add functionality
         else if(strncmp(input[0], traverse, 8) == 0){
             if(strncmp(input[1], dashel, 2) == 0){
-                //fn_traverse_l();
+                fn_traverse(root, root_entries, fat1, fd, 1);
             } else {
-                //print_dir(root, boot->num_root_entries);
-                fn_traverse(root, root_entries, fat1, fd);
+                fn_traverse(root, root_entries, fat1, fd, 0);
             }
         }
-        /////////////////////////////////////////
-        ///print a hex dump of a given filename//
-        /////////////////////////////////////////
+        //////////////////////////////////////////
+        /// print a hex dump of a given filename//
+        //////////////////////////////////////////
         else if(strncmp(input[0], showfile, 8) == 0){
             if(fn_showfile(files, file_count, input[1]) < 0){
                 printf("file not found: %s\n", input[1]);
             }
         }
-        /////////////////
-        ///quit program//
-        /////////////////
+        //////////////////
+        /// quit program//
+        //////////////////
         else if( strncmp(input[0], quit, 4) == 0){
-            if(fd != 0){
+            if(fd != 0 && mount_flag){
                 //if an image remains mounted, call umount now.
                 fn_umount(&fd, fname, max, boot, fat1, root, files);
             }
             break;
         }
-        ////////////////////////////
-        ///user pressed return key//
-        ////////////////////////////
+        /////////////////////////////
+        /// user pressed return key//
+        /////////////////////////////
         else if( strncmp(input[0], "\n", 1) == 0){ continue;}
-        ///////////////////////////////////////
-        ///user did not enter a valid command//
-        ///////////////////////////////////////
+        ////////////////////////////////////////
+        /// user did not enter a valid command//
+        ////////////////////////////////////////
         else{printf("please re-try your command\n");}
     }
     exit( 0);
